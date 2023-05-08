@@ -90,6 +90,11 @@ It is a very simple to install minikube on your laptop and it is designed for le
 Cons
 The inconvenience of this solution is this is not possible to add other nodes, and by consequence, to discover how the architecture really works and the full power of Kubernetes.
 
+#Microk8s - CRI
+Microk8s is similar to minikube in that it spins up a single-node Kubernetes cluster with its own set of add-ons.
+Like minikube, microk8s is limited to a single-node Kubernetes cluster, 
+with the added limitation of only running on Linux and only on Linux where snap is installed.
+
 #Kubeadm - CRI
 Kubeadm is the “hard way” to begin with Kubernetes. 
 With this solution, you will be able to bootstrap a minimum viable Kubernetes cluster that conforms to best practices. The cluster minimal size is composed of two nodes: Master node & Worker node
