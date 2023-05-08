@@ -1,0 +1,285 @@
+*************************************************************************************************************************** Reference
+#https://viblo.asia/p/k8s-xay-dung-kubernetes-cluster-bang-cong-cu-kubeadm-tren-virtual-box-38X4ENOAJN2
+#https://itzone.com.vn/vi/article/xay-dung-kubernetes-cluster-bang-cong-cu-kubeadm-tren-virtual-box/
+
+#start VM
+vagrant up 
+
+#check VM status
+vagrant status
+kubemaster                running (virtualbox)
+kubenode01                running (virtualbox)
+kubenode02                running (virtualbox)
+
+#connect to VM
+vagrant ssh kubemaster
+
+*************************************************************************************************************************** Setup 
+cat <<EOF | sudo tee /etc/modules-load.d/modules.conf
+overlay
+br_netfilter
+EOF
+*
+sudo modprobe overlay
+sudo modprobe br_netfilter
+*
+#check module overlay & br_netfilter was loaded
+lsmod | grep overlay
+lsmod | grep br_netfilter
+*
+#  thiết lập các tham số sysctl, luôn tồn tại dù khởi động lại
+nano /etc/sysctl.d/99-sysctl.conf
+net.ipv4.ip_forward=1
+#or
+cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+EOF
+*
+# Áp dụng các tham số sysctl mà không cần khởi động lại
+sudo sysctl --system
+*
+#check status
+sysctl net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables net.ipv4.ip_forward
+*
+#Output
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward = 1
+
+*************************************************************************************************************************** Install CONTAINERD
+#note: Dockershim was removed from Kubernetes v1.24 on so we use containerd instead
+
+sudo apt-get update
+sudo apt-get install \
+ca-certificates \
+curl \
+gnupg \
+lsb-release
+*
+sudo mkdir -m 0755 -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+*
+echo \
+"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+$(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+*
+sudo apt-get update
+sudo apt-get install containerd.io
+*
+#Configure CGROUP DRIVER for CONTAINERD
+#replace all content in config.toml and restart containerd
+sudo nano /etc/containerd/config.toml
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+    SystemdCgroup = true
+*
+sudo systemctl restart containerd
+sudo systemctl enable containerd
+
+*************************************************************************************************************************** Allow required port for kubernetes or Disable Firewall
+sudo ufw disable
+Setup iptables backend to use iptables-legacy
+
+sudo update-alternatives --config iptablesThere are 2 choices for the alternative iptables (providing /usr/sbin/iptables).Selection    Path                       Priority   Status
+------------------------------------------------------------
+  0            /usr/sbin/iptables-nft      20        auto mode
+* 1            /usr/sbin/iptables-legacy   10        manual mode
+  2            /usr/sbin/iptables-nft      20        manual modePress <enter> to keep the current choice[*], or type selection number:
+
+******************************************************************************* Turn off swap space
+sudo swapoff -a
+sudo sed -i '/ swap / s/^(.*)$/#1/g' /etc/fstab #for fstab /etc/fstab
+sudo apt-get update
+sudo apt-get install -y apt-transport-https ca-certificates curl
+sudo mkdir -m 0755 -p /etc/apt/keyrings
+sudo curl -fsSLo /etc/apt/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+*
+curl -LO "https://storage.googleapis.com/kubernetes-release/release/$(curl -s \
+https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl"
+*
+chmod +x ./kubectl
+sudo mv ./kubectl /usr/local/bin/kubectl
+sudo apt-get update
+sudo apt-get install -y kubelet kubeadm kubectl
+sudo systemctl enable kubelet
+
+*************************************************************************************************************************** Create CONTROL PLANE on kubemaster using kubeadm
+#Another option
+--apiserver-advertise-address=192.168.56.2: Địa chỉ IP mà máy chủ API sẽ lắng nghe các câu lệnh. Trong hướng dẫn này sẽ là địa chỉa IP của máy ảo kubemaster.
+--pod-network-cidr=10.244.0.0/16: control plane sẽ tự động phân bổ địa chỉ IP trong CIDR chỉ định cho các pod trên mọi node trong cụm cluster. 
+Bạn sẽ cần phải chọn CIDR sao cho không trùng với bất kỳ dải mạng hiện có để tránh xung đột địa chỉ IP.
+kubeadm init đầu tiên sẽ chạy một loại các bước kiểm tra để đảm bảo máy đã sẵn sàng chạy Kubernetes. 
+Những bước kiểm tra này sẽ đưa ra các cảnh báo và thoát lệnh khi có lỗi. Kế tiếp kubeadm init tải xuống và cài đặt các thành phần của control plane. 
+Việc này có thể sẽ mất vài phút, sau khi kết thúc bạn sẽ thấy thông báo:
+***Cảnh báo: Kubeadm cấp certificate trong admin.conf để có Subject: O = system:masters, CN = kubernetes-admin.
+    system:masters là một nhóm người dùng siêu cấp, bỏ qua lớp ủy quyền (như RBAC). 
+    Tuyệt đối không chia sẻ tệp admin.conf với bất kỳ ai, 
+    thay vào đó hãy cấp cho người dùng các quyền tùy chỉnh bằng cách tạo cho họ một tệp kubeconfig với lệnh kubeadm kubeconfig. 
+    Để biết thêm chi tiết hãy đọc Generating kubeconfig files for additional users.   
+
+control_ip: 10.0.0.10
+dns_servers:
+    - 8.8.8.8
+    - 1.1.1.1
+pod_cidr: 172.16.1.0/16
+service_cidr: 172.17.1.0/18
+NODENAME=$(hostname -s)
+sudo kubeadm init --apiserver-advertise-address=$CONTROL_IP --apiserver-cert-extra-sans=$CONTROL_IP --pod-network-cidr=$POD_CIDR --service-cidr=$SERVICE_CIDR --node-name "$NODENAME" --cri-socket /run/containerd/containerd.sock --ignore-preflight-errors Swap
+*
+sudo kubeadm init --apiserver-advertise-address=192.168.56.2 --apiserver-cert-extra-sans=192.168.56.2 --pod-network-cidr 192.168.0.0/16 --service-cidr=172.17.1.0/18 --node-name kubemaster --cri-socket /run/containerd/containerd.sock --ignore-preflight-errors Swap
+*
+sudo kubeadm init --apiserver-advertise-address=192.168.56.2 --pod-network-cidr=10.244.0.0/16 #simple code
+
+#Run command below to both of master and nodes
+#For master node
+    mkdir -p /home/vagrant/.kube
+    sudo cp -i /etc/kubernetes/admin.conf /home/vagrant/.kube/config
+    sudo chown 1000:1000 /home/vagrant/.kube/config
+    export KUBECONFIG=/etc/kubernetes/admin.conf
+
+#For worker nodes
+    mkdir -p /home/vagrant/.kube
+    nano /home/vagrant/.kube/config
+    sudo chown 1000:1000 /home/vagrant/.kube/config
+
+#Add NODE to CLUSTER for worker node – VM: kubenode01, kubenode02
+#sudo kubeadm join --token &lt;token&gt; &lt;control-plane-host&gt;:&lt;control-plane-port&gt; --discovery-token-ca-cert-hash sha256:&lt;hash&gt;
+kubeadm join 192.168.56.2:6443 --token e9eqri.0cw1rq4i8tme93h0 \
+        --discovery-token-ca-cert-hash sha256:ab5d5fadcf1388a9de01396aa010a3e89abb3229bfa6922d37980a330f6a93c9
+
+#get token 
+kubeadm token list
+TOKEN                     TTL         EXPIRES                USAGES                   DESCRIPTION                                                EXTRA GROUPS
+e9eqri.0cw1rq4i8tme93h0   23h         2023-04-30T02:55:00Z   authentication,signing   The default bootstrap token generated by 'kubeadm init'.   system:bootstrappers:kubeadm:default-node-token
+
+#Mặc định, <tokens> sẽ hết hạn sau 24 giờ. Nếu bạn thêm worker node khi <token> đã hết hạn, bạn có thể tạo <token> mới bằng cách chạy lệnh sau trên control-plane node:
+#create new token
+kubeadm token create
+#Output like 5didvk.d09sbcov8ph2amjw
+
+#get new hash
+openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2&gt;/dev/null | 
+openssl dgst -sha256 -hex | sed 's/^.* //'
+#Output like 8cb2de97839780a412b93877f8507ad6c94f73add17d5d7058e91741c9d5ec78
+
+#Lấy <control-plane-host>:<control-plane-port> bằng lệnh
+cat /$HOME/.kube/config | grep server
+#Output like server: https://192.168.56.2:6443
+
+*************************************************************************************************************************** Edit Node Role on master node
+kubectl label node <node-name> node-role.kubernetes.io/worker=worker
+*
+kubectl label node kubenode01 node-role.kubernetes.io/worker=worker
+kubectl label node kubenode02 node-role.kubernetes.io/worker=worker   
+
+******************************************************************************* Install Metrics Server
+kubectl apply -f https://raw.githubusercontent.com/techiescamp/kubeadm-scripts/main/manifests/metrics-server.yaml
+
+*************************************************************************************************************************** Install Container Network Interface (CNI) - POD NETWORK ADD-ON
+Bạn phải triển khai Container Network Interface (CNI) hỗ trợ Pod network add-on để các Pod có thể giao tiếp với nhau. 
+Cluster DNS (CoreDNS) sẽ không được khởi động cho đến khi hoàn thất thiết lập pod network.
+Pod network add-ons là Kubernetes-specific CNI plugins cung cấp kết nối mạng giữa các pod trong một Kubernetes cluster. 
+Nó tạo một mạng overlay ảo phủ toàn bộ cluster và gắn cho mỗi pod một địa chỉ IP riêng.
+Trong khi CNI plugins có thể được sử dụng với mọi container runtime, pod network add-ons dành riêng cho Kubernetes và cung cấp chức năng mạng cần thiết cho mô hình mạng Kubernetes. 
+Một số ví dụ về pod network add-ons có kể đến Calico, Flannel, and Weave Net. (Xem thêm các pod network add-ons khác tại đây)
+Trong hướng dẫn này, chúng ta sẽ sử dụng Weave Net add-ons. Nó dễ dàng cài đặt, sử dụng và phù hợp với việc triển khai ở quy mô nhỏ.
+Để cài đặt nó cho Kubernetes cluster, chạy lệnh dưới đây trên control plane kubemaster:
+
+                                        *********************************************************************************** CNI Weave Net
+        wget https://github.com/weaveworks/weave/releases/download/v2.8.1/weave-daemonset-k8s.yaml
+        Edit weave-daemonset-k8s.yaml
+        
+        spec:
+        ...
+            template:
+            ...
+                spec:
+                ...
+                    containers:
+                    ...
+                        env:
+                        ...
+                        - name: IPALLOC_RANGE #add this
+                          value: 10.244.0.0/16 #add this
+                        name: weave
+
+
+        kubectl apply -f weave-daemonset-k8s.yaml
+        #Check configuration
+        kubectl edit ds weave-net -n kube-system
+
+                                        *********************************************************************************** CNI Calico
+#Do this configuration on master nodes
+
+curl https://raw.githubusercontent.com/projectcalico/calico/v3.25.1/manifests/calico.yaml -O
+kubectl apply -f calico.yaml
+
+****edit cidr: 192.168.0.0/16 to your pod network
+
+#If the kube controllers pod stays in the pending state for too long, try issuing the following command:
+kubectl taint nodes --all node-role.kubernetes.io/control-plane-
+#Remove node taints from the node.
+kubectl taint nodes --all node-role.kubernetes.io/master-
+
+kubectl get pods -n calico-system
+kubectl get nodes -o wide
+
+#Using calicoctl instead of kubectl
+https://docs.tigera.io/calico/latest/operations/calicoctl/install
+
+                                        *********************************************************************************** CNI Flannel
+kubectl apply -f https://github.com/coreos/flannel/raw/master/Documentation/kube-flannel.yml
+wget             https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
+
+#If your Kubernetes installation is using custom podCIDR (not 10.244.0.0/16) you need to modify the network to match your one in downloaded manifest.
+
+$ vim kube-flannel.yml
+net-conf.json: |
+    {
+      "Network": "10.244.0.0/16",
+      "Backend": {
+        "Type": "vxlan"
+      }
+    }
+    
+*************************************************************************************************************************** Creat namespace for pod   
+kubectl create namespace <name>
+kubectl apply -f <path> --namespace <name>
+
+*************************************************************************************************************************** CLEAN UP
+#Use kubectl drain to remove a node from service    
+#You can use kubectl drain to safely evict all of your pods from a node before you perform maintenance on the node (e.g. kernel upgrade, hardware maintenance, etc.). 
+Safe evictions allow the pod's containers to gracefully terminate and will respect the PodDisruptionBudgets you have specified.
+
+#Note: By default kubectl drain ignores certain system pods on the node that cannot be killed; see the kubectl drain documentation for more details.
+#When kubectl drain returns successfully, 
+#that indicates that all of the pods (except the ones excluded as described in the previous paragraph) have been safely evicted (respecting the desired graceful termination period, 
+#and respecting the PodDisruptionBudget you have defined). It is then safe to bring down the node by powering down its physical machine or, if running on a cloud platform, deleting its virtual machine.
+
+#If there are pods managed by a DaemonSet, you will need to specify --ignore-daemonsets with kubectl to successfully drain the node. 
+#The kubectl drain subcommand on its own does not actually drain a node of its DaemonSet pods: the DaemonSet controller (part of the control plane) immediately replaces missing Pods with new equivalent Pods. 
+#The DaemonSet controller also creates Pods that ignore unschedulable taints, which allows the new Pods to launch onto a node that you are draining.
+
+#First, identify the name of the node you wish to drain. You can list all of the nodes in your cluster with
+kubectl drain --force --ignore-daemonsets <node name>
+
+#Once it returns (without giving an error), you can power down the node (or equivalently, if on a cloud platform, delete the virtual machine backing the node). 
+#If you leave the node in the cluster during the maintenance operation, you need to run
+kubectl uncordon <node name>
+
+#To reset kubeadm state
+kubeadm reset
+      
+#To delete Node
+kubectl delete node <node name>
+
+#To clean up CONTROL PLANE
+#--kubeconfig=string: Xóa kubeconfig file được dùng để giao tiếp với cluster. 
+#Nếu không khai báo, một số thư mục sẽ được tìm để xóa kubeconfig file. (Nếu bạn thiết lập cho non-root user sau khi chạy kubeadm init, đừng quên xóa tệp thiết lập $HOME/.kube/config)
+sudo kubeadm reset --kubeconfig="$HOME/.kube/config"
+     
+

@@ -1,0 +1,79 @@
+#edit number of node in setting.yaml
+...
+  workers:
+    count: 1
+...
+
+#deploy ngix to nodes
+kubectl apply -f https://raw.githubusercontent.com/scriptcamp/kubeadm-scripts/main/manifests/sample-app.yaml
+kubectl apply -f /vagrant/nextcloud.yaml
+kubectl apply -f /vagrant/nginx01.yml
+kubectl run nginx --image=nginx --restart=Never
+kubectl delete pod nginx*
+
+# access Nginx from node01
+http://10.0.0.11:32000
+
+#To find out the container runtime used on a Node 
+#Use kubectl to fetch and show node information:
+kubectl get nodes -o wide
+
+#To update the nginx Pods to use the nginx:1.16.1 image instead of the nginx:1.14.2 image.
+#https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
+kubectl set image deployment.v1.apps/nginx-deployment nginx=nginx:1.16.1 ( <container-image-name>=<new-value> )
+or
+kubectl set image deployment/nginx-deployment nginx=nginx:1.16.1
+#After that it will create new ReplicaSet and change current state to new ReplicaSet
+
+#Checking Rollout History of a Deployment
+kubectl rollout history deployment/<name>
+kubectl rollout history deployment/nginx-deployment
+
+#to rollback to previous version
+kubectl rollout history deployment/nginx-deployment --revision=<number>
+
+#to undo the current rollout and rollback to the previous revision
+kubectl rollout undo deployment/<name>
+kubectl rollout undo deployment/nginx-deployment
+
+#to undo the current rollout and rollback to the specific revision
+kubectl rollout undo deployment/nginx-deployment --to-revision=2
+#delete container in order below
+
+#Scaling a Deployment - Edit number of ReplicaSet (up/down replicaset)
+kubectl scale deployment/<name> --replicas=<number> rs/<<replica-name>
+kubectl scale deployment/nginx-deployment --replicas=3
+kubectl edit rs <replica-name> #for realtime running
+# to scale down all deployments in the namespace
+kubectl scale deployment/<name>  –-replicas=1 –all (Option: -n <namespace>)
+
+#option for CPU Usage
+--min=3 --max=20 --cpu-percent=60
+
+
+# delete deployment will delete replicaset
+kubectl get deployments
+kubectl describe deployment
+kubectl delete deployment <name>
+
+kubectl get rs # Get ReplicaSet
+kubectl delete rs <name>
+
+kubectl get services
+kubectl delete services <name>
+
+kubectl get pods
+kubectl delete pod <name>
+
+#for maintainance
+kubectl describe pod <name>
+kubectl describe pod <name> -o wide
+kubectl describe pod <name> -o yaml 
+kubectl logs <pod name>
+kubectl history | grep <line/name>
+#to Exec into CrashLoopBackOff POD
+https://www.middlewareinventory.com/blog/how-to-exec-into-crashloopbackoff-pod-kubernetes-devopsjunction/
+
+kubectl delete --all pods --namespace=kube-system
+kubectl delete --all deployments --namespace=kube-system
+kubectl delete all --all --namespace=kube-system

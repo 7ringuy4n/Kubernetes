@@ -1,0 +1,243 @@
+Master Node – A control panel for the whole Kubernetes cluster. The components of the master can be run on any node in the cluster. The key components are:
+API server: The entry point for all REST commands, the sole component of the Master Node which is user-accessible.
+Datastore: Strong, consistent, and highly-available key-value storage used by the Kubernetes cluster.
+Scheduler: Watches for newly-created pods and assigns them to nodes. Deployment of pods and services onto the nodes happen because of the scheduler.
+Controller manager: Runs all the controllers that handle routine tasks in the cluster.
+Worker nodes: Primary node agent, also called minion nodes. The pods are run here. Worker nodes contain all the necessary services to manage networking between the containers, communicate with the master node, and assign resources to the containers scheduled.
+Docker: Runs on each worker node and downloads images and starting containers.
+Kubelet: Monitors the state of a pod and ensures that the containers are up and running. It also communicates with the data store, getting information about services and writing details about newly created ones.
+Kube-proxy: A network proxy and load balancer for a service on a single worker node. It is responsible for traffic routing.
+Kubectl: A CLI tool for the users to communicate with the Kubernetes API server.
+Pods are the smallest unit of the Kubernetes cluster, it is like one brick in the wall of a huge building. A pod is a set of containers that need to run together and can share resources (Linux namespaces, cgroups, IP addresses). Pods are not intended to live long.
+Services are an abstraction on top of a number of pods, typically requiring a proxy on top for other services to communicate with it via a virtual IP address.
+***************************************************************************************************************************
+
+Namespaces #https://kubernetes.io/docs/tasks/administer-cluster/namespaces-walkthrough/
+Nodes
+Pods
+Label & Selector #Select a node which described in label type
+Multi Container Pods
+Workloads - ReplicaSet (for self-healing), Deployment, DaemonSet, StatefulSet, Job, CronJob
+Updates - Rolling Updates, Blue-Green Deployment
+Services - ClusterIP, NodePort, Load Balancer
+Storage & Persistence
+Application Settings - Configmaps, Secrets
+Observalibilty - Startup, Readlines, Liveness Probes
+Dashboards 
+Scaling - Autoscaling
+******************************************************************************
+Master Node/Control Plane{
+    etcd #where key value store for cluster state data, only API Server communicates to, not a database or datastore for applications to use
+    Kube controller - manager #Node Controller, Replication controller, endpoint Controller, Service account & Token controllers
+    Cloud controller - manager #interact with cloud provider controller (Node, Route, Service, Volume)
+    Kube Scheduler #is a control plane process which assigns Pod to suitable Node
+    Kube API Server{ #where minikube/kubectl connect to, it saves state to etcd
+        Kubernetes cluser/Load Balancer{ #Using Cluster Creating tool like kubeadm, minikube, k3s and so on
+            Worker Node 1{
+                Kubelet #communicates to API Server
+                Kube Proxy/Network Proxy #link 2 nodes and where users connect to
+                Container runtimes {Docker, containerd, cri-o, Kind or K8s and so on
+                    Namspace A{
+                        Pod 1{
+                            Container 1
+                            Container 2
+                        }
+                        Pod 2{
+                            Container 3
+                        }
+                    }
+                    Namspace B{
+                        Pod 3{
+                            Container 4
+                        }
+                    }
+                }
+                Optional Add-ons        
+            }            
+            Worker Node 2{
+                Kubelet #communicates to API Server
+                Kube Proxy/Network Proxy #link 2 nodes and where users connect to
+                Container runtimes {Docker, containerd, cri-o, Kind or K8s and so on
+                    Namspace A{
+                        Pod 1{
+                            Container 1
+                            Container 2
+                        }
+                        Pod 2{
+                            Container 3
+                        }
+                    }
+                    Namspace B{
+                        Pod 3{
+                            Container 4
+                        }
+                    }
+                }
+                Optional Add-ons 
+            }  
+        }        
+    }            
+}
+
+
+*************************************************************************************************************************** 4 Kubernetes technology cluster
+https://www.padok.fr/en/blog/minikube-kubeadm-kind-k3s
+https://viblo.asia/p/xay-dung-cum-kubernetes-high-availability-voi-k3s-va-k3d-4P856ppRZY3
+
+#minikube - CRI
+Pros
+It is a very simple to install minikube on your laptop and it is designed for learning and testing. When started, it will deploy a local kubernetes cluster (with a single node, the smallest size).
+Cons
+The inconvenience of this solution is this is not possible to add other nodes, and by consequence, to discover how the architecture really works and the full power of Kubernetes.
+
+#Kubeadm - CRI
+Kubeadm is the “hard way” to begin with Kubernetes. 
+With this solution, you will be able to bootstrap a minimum viable Kubernetes cluster that conforms to best practices. The cluster minimal size is composed of two nodes: Master node & Worker node
+Pros
+and you can add as many workers as you want.
+Cons
+This solution is quite heavy to run on a laptop. Each node should be deployed in a virtual machine and the minimal requirements are:
+If you want to deploy a cluster with several nodes you must have a quite powerful computer. 
+But you will be able to discover the full potential of Kubernetes.
+
+#Kind - CRI
+#This solution allows you to deploy all type of clusters:
+Single node
+1 master and several workers
+Several masters and several workers
+
+#All the instructions for Kind installation and configuration are well described in the Kind documentation.
+https://kind.sigs.k8s.io/docs/user/quick-start/
+
+#K3S - CRI
+#K3S is a light Kubernetes version developed by Rancher. 
+#It has been created for production use on small servers, IoT appliances, etc. 
+#The binary is less than 50 Mo and it can be run on a very small virtual machine
+#Furthermore, K3S installation and cluster deployment are very easy. And you can create clusters with multi masters.
+https://rancher.com/docs/k3s/latest/en/quick-start/
+
+*************************************************************************************************************************** Using docker as Container Runtime
+#Docker Engine 
+#Note: These instructions assume that you are using the cri-dockerd adapter to integrate Docker Engine with Kubernetes.
+#On each of your nodes, install Docker for your Linux distribution as per Install Docker Engine.
+#Install cri-dockerd, following the instructions in that source code repository.
+#For cri-dockerd, the CRI socket is /run/cri-dockerd.sock by default
+https://www.youtube.com/watch?v=V_hzP_nEOkI&ab_channel=Kubesimplify
+https://blog.kubesimplify.com/kubernetes-125-dockerd#heading-step-1-run-this-on-all-the-machines
+
+Setup Dockerd - Dockershim got deprecated and removed in Kubernetes 1.24 but Mirantis is maintaining that. 
+So we will be using the mirantis maintained cri-dockerd for this tutorial.
+
+#First let's install docker
+apt install docker.io -y
+systemctl start docker
+systemctl enable docker
+
+#Now, cri-dockerd setup
+wget https://github.com/Mirantis/cri-dockerd/releases/download/v0.2.5/cri-dockerd-0.2.5.amd64.tgz
+tar -xvf cri-dockerd-0.2.5.amd64.tgz
+cd cri-dockerd/
+mkdir -p /usr/local/bin
+install -o root -g root -m 0755 ./cri-dockerd /usr/local/bin/cri-dockerd
+
+#Add the files cri-docker.socker cri-docker.service
+sudo tee /etc/systemd/system/cri-docker.service << EOF
+[Unit]
+Description=CRI Interface for Docker Application Container Engine
+Documentation=https://docs.mirantis.com
+After=network-online.target firewalld.service docker.service
+Wants=network-online.target
+Requires=cri-docker.socket
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/cri-dockerd --container-runtime-endpoint fd:// --network-plugin=
+ExecReload=/bin/kill -s HUP $MAINPID
+TimeoutSec=0
+RestartSec=2
+Restart=always
+StartLimitBurst=3
+StartLimitInterval=60s
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+TasksMax=infinity
+Delegate=yes
+KillMode=process
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo tee /etc/systemd/system/cri-docker.socket << EOF
+[Unit]
+Description=CRI Docker Socket for the API
+PartOf=cri-docker.service
+[Socket]
+ListenStream=%t/cri-dockerd.sock
+SocketMode=0660
+SocketUser=root
+SocketGroup=docker
+[Install]
+WantedBy=sockets.target
+EOF
+
+#Daemon reload
+systemctl daemon-reload
+systemctl enable cri-docker.service
+systemctl enable --now cri-docker.socket
+
+#Pull the images - Pull the images for Kubernetes 1.25 version.
+sudo kubeadm config images pull --cri-socket unix:///var/run/cri-dockerd.sock --kubernetes-version v1.26.0
+
+#Run the cluster init command on the control plane node
+sudo kubeadm init --pod-network-cidr=10.244.0.0/16 --upload-certs --kubernetes-version=v1.25.0 --control-plane-endpoint=74.220.19.161 --cri-socket unix:///var/run/cri-dockerd.sock
+
+#Join woker node to master node
+#Remember to add the --cri-socket flag at the end
+kubeadm join 74.220.19.161:6443 --token 6gh7gq.yxxvl9c0tjauu7up \      
+--discovery-token-ca-cert-hash sha256:e3ecc16a7c7fa9ccf3c334e98bd53c18c86e9831984f1f7c8398fbd54d5e37e9  --cri-socket unix:///var/run/cri-dockerd.sock
+
+#Create images
+#For Example
+kubectl run nginx --image=nginx
+
+#Runtime	Path to Windows named pipe
+containerd	npipe:////./pipe/containerd-containerd
+Docker Engine (using cri-dockerd)	npipe:////./pipe/cri-dockerd
+
+#Runtime	Path to Unix domain socket
+containerd	unix:///var/run/containerd/containerd.sock
+CRI-O	unix:///var/run/crio/crio.sock
+Docker Engine (using cri-dockerd)	unix:///var/run/cri-dockerd.sock
+
+***************************************************************************************************************************
+#Changing the Container Runtime on a Node from Docker Engine to containerd
+https://kubernetes.io/docs/tasks/administer-cluster/migrating-from-dockershim/change-runtime-containerd/
+
+#List All Container Images Running in a Cluster
+https://kubernetes.io/docs/tasks/access-application-cluster/list-all-running-container-images/
+
+**********Kubernetes CLI*****************
+#Kubectl Cheat Sheet
+https://spacelift.io/blog/kubernetes-cheat-sheet
+https://www.tutorialspoint.com/kubernetes/kubernetes_kubectl_commands.htm
+https://kubernetes.io/docs/reference/kubectl/cheatsheet/
+
+Kubectl config current-context #Get the current context
+Kubectl config get-context #List all context
+Kubectl config use-context <context-name> #Set the current context
+Kubectl config delete-context <context-name> #Delete a context from teh config file
+
+#Kubectl command to list the containers and images inside the pod
+kubectl get pods -n default -o jsonpath='{range .items[*]}{"\n"}{.metadata.name}{"\t"}{.metadata.namespace}{"\t"}{range .spec.containers[*]}{.name}{"=>"}{.image}{","}{end}{end}'|sort|column -t
+
+#To list All the images and container in your Kubernetes cluster
+kubectl get pods -A -o jsonpath='{range .items[*]}{"\n"}{.metadata.name}{"\t"}{.metadata.namespace}{"\t"}{range .spec.containers[*]}{.name}{"=>"}{.image}{","}{end}{end}'|sort|column -t
+
+#Output pod information to YAML format
+kubectl get pod <name> -o yaml
+
+#export pod to YAML
+kubectl get pod <name> -o yaml > <name>.yml
+
+https://kubernetes.io/docs/tasks/tools/
+https://minikube.sigs.k8s.io/docs/start/

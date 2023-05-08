@@ -1,0 +1,533 @@
+#https://viblo.asia/p/k8s-xay-dung-kubernetes-cluster-bang-cong-cu-kubeadm-tren-virtual-box-38X4ENOAJN2
+#https://itzone.com.vn/vi/article/xay-dung-kubernetes-cluster-bang-cong-cu-kubeadm-tren-virtual-box/
+
+#start VM
+vagrant up 
+
+#check VM status
+vagrant status
+kubemaster                running (virtualbox)
+kubenode01                running (virtualbox)
+kubenode02                running (virtualbox)
+
+#connect to VM
+vagrant ssh kubemaster
+
+#note: Dockershim was removed from Kubernetes v1.24 on so we use containerd instead
+#install CONTAINER RUNTIME (CONTAINERD) to all VM
+nano /etc/modules-load.d/modules.conf
+overlay
+br_netfilter
+#Or
+cat <<EOF | sudo tee /etc/modules-load.d/modules.conf
+overlay
+br_netfilter
+EOF
+
+sudo modprobe overlay
+sudo modprobe br_netfilter
+
+#check module overlay & br_netfilter was loaded
+lsmod | grep overlay
+lsmod | grep br_netfilter
+
+#  thiết lập các tham số sysctl, luôn tồn tại dù khởi động lại
+nano /etc/sysctl.d/99-sysctl.conf
+net.ipv4.ip_forward=1
+#or
+cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+EOF
+
+# Áp dụng các tham số sysctl mà không cần khởi động lại
+sudo sysctl --system
+
+#check status
+sysctl net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables net.ipv4.ip_forward
+
+#Output
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward = 1
+
+#install CONTAINERD
+sudo apt-get update
+sudo apt-get install \
+ca-certificates \
+curl \
+gnupg \
+lsb-release
+
+sudo mkdir -m 0755 -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+echo \
+"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+$(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt-get update
+sudo apt-get install containerd.io
+
+#Configure CGROUP DRIVER for CONTAINERD
+#replace all content in config.toml and restart containerd
+sudo nano /etc/containerd/config.toml
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+    SystemdCgroup = true
+
+sudo systemctl restart containerd
+sudo systemctl enable containerd
+*******************************************************************************
+#Allow required port for kubernetes or Disable Firewall
+
+sudo ufw disable
+Setup iptables backend to use iptables-legacy
+
+sudo update-alternatives --config iptablesThere are 2 choices for the alternative iptables (providing /usr/sbin/iptables).Selection    Path                       Priority   Status
+------------------------------------------------------------
+  0            /usr/sbin/iptables-nft      20        auto mode
+* 1            /usr/sbin/iptables-legacy   10        manual mode
+  2            /usr/sbin/iptables-nft      20        manual modePress <enter> to keep the current choice[*], or type selection number:
+Add kubernetes repository
+*******************************************************************************
+
+#turn off swap space
+sudo swapoff -a
+sudo sed -i '/ swap / s/^(.*)$/#1/g' /etc/fstab #for fstab /etc/fstab
+
+sudo apt-get update
+sudo apt-get install -y apt-transport-https ca-certificates curl
+
+sudo mkdir -m 0755 -p /etc/apt/keyrings
+sudo curl -fsSLo /etc/apt/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+curl -LO "https://storage.googleapis.com/kubernetes-release/release/$(curl -s \
+https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl"
+
+chmod +x ./kubectl
+sudo mv ./kubectl /usr/local/bin/kubectl
+
+sudo apt-get update
+sudo apt-get install -y kubelet kubeadm kubectl
+
+sudo systemctl enable kubelet
+
+******************************************************************************* kubeadm
+#create CONTROL PLANE on kubemaster
+control plane là nơi chạy các component bao gồm etcd (cơ sở dữ liệu của cluster) và API Server (nơi các câu lệnh kubectl giao tiếp).
+
+Để tiến hành khởi tạo, chạy câu lệnh sau ở máy ảo mà chúng ta đặt tên là kubemaster:
+
+sudo kubeadm init --apiserver-advertise-address=192.168.56.2 --pod-network-cidr=10.244.0.0/16
+
+#Another option - source from calico
+
+  control_ip: 10.0.0.10
+  dns_servers:
+    - 8.8.8.8
+    - 1.1.1.1
+  pod_cidr: 172.16.1.0/16
+  service_cidr: 172.17.1.0/18
+  NODENAME=$(hostname -s)
+  
+sudo kubeadm init --apiserver-advertise-address=$CONTROL_IP --apiserver-cert-extra-sans=$CONTROL_IP --pod-network-cidr=$POD_CIDR --service-cidr=$SERVICE_CIDR --node-name "$NODENAME" --cri-socket /run/containerd/containerd.sock --ignore-preflight-errors Swap
+
+--apiserver-advertise-address=192.168.56.2: Địa chỉ IP mà máy chủ API sẽ lắng nghe các câu lệnh. Trong hướng dẫn này sẽ là địa chỉa IP của máy ảo kubemaster.
+--pod-network-cidr=10.244.0.0/16: control plane sẽ tự động phân bổ địa chỉ IP trong CIDR chỉ định cho các pod trên mọi node trong cụm cluster. 
+Bạn sẽ cần phải chọn CIDR sao cho không trùng với bất kỳ dải mạng hiện có để tránh xung đột địa chỉ IP.
+kubeadm init đầu tiên sẽ chạy một loại các bước kiểm tra để đảm bảo máy đã sẵn sàng chạy Kubernetes. 
+Những bước kiểm tra này sẽ đưa ra các cảnh báo và thoát lệnh khi có lỗi. Kế tiếp kubeadm init tải xuống và cài đặt các thành phần của control plane. 
+Việc này có thể sẽ mất vài phút, sau khi kết thúc bạn sẽ thấy thông báo:
+
+#Output
+#Your Kubernetes control-plane has initialized successfully!
+
+#To start using your cluster, you need to run the following as a regular user:
+
+#  mkdir -p $HOME/.kube
+#  sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+#  sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+#Alternatively, if you are the root user, you can run:
+
+#  export KUBECONFIG=/etc/kubernetes/admin.conf
+
+#You should now deploy a pod network to the cluster.
+#Run "kubectl apply -f [podnetwork].yaml" with one of the options listed at:
+#  https://kubernetes.io/docs/concepts/cluster-administration/addons/
+
+#Then you can join any number of worker nodes by running the following on each as root:
+
+#kubeadm join 192.168.56.2:6443 --token e9eqri.0cw1rq4i8tme93h0 \
+#        --discovery-token-ca-cert-hash sha256:ab5d5fadcf1388a9de01396aa010a3e89abb3229bfa6922d37980a330f6a93c9
+#EOF
+
+#sudo kubeadm join --token <token> <control-plane-host>:<control-plane-port> --discovery-token-ca-cert-hash sha256:<hash>
+
+#Run command below to both of master and nodes
+Để kubectl có thể dùng với non-root user, chạy những lệnh sau, chúng cũng được nhắc trong output khi kubeadm init thành công:
+    mkdir -p /home/vagrant/.kube
+    sudo cp -i /etc/kubernetes/admin.conf /home/vagrant/.kube/config
+    sudo chown 1000:1000 /home/vagrant/.kube/config
+ 
+#For nodes
+    mkdir -p /home/vagrant/.kube
+    nano /home/vagrant/.kube/config
+    sudo chown 1000:1000 /home/vagrant/.kube/config
+
+Mặt khác, nếu bạn là root user, có thể dùng lệnh sau:
+    export KUBECONFIG=/etc/kubernetes/admin.conf
+
+Cảnh báo: Kubeadm cấp certificate trong admin.conf để có Subject: O = system:masters, CN = kubernetes-admin.
+    system:masters là một nhóm người dùng siêu cấp, bỏ qua lớp ủy quyền (như RBAC). 
+    Tuyệt đối không chia sẻ tệp admin.conf với bất kỳ ai, 
+    thay vào đó hãy cấp cho người dùng các quyền tùy chỉnh bằng cách tạo cho họ một tệp kubeconfig với lệnh kubeadm kubeconfig. 
+    Để biết thêm chi tiết hãy đọc Generating kubeconfig files for additional users.   
+
+*******************************************************************************
+#Add NODE to CLUSTER for worker node – VM: kubenode01, kubenode02
+#sudo kubeadm join --token &lt;token&gt; &lt;control-plane-host&gt;:&lt;control-plane-port&gt; --discovery-token-ca-cert-hash sha256:&lt;hash&gt;
+kubeadm join 192.168.56.2:6443 --token e9eqri.0cw1rq4i8tme93h0 \
+        --discovery-token-ca-cert-hash sha256:ab5d5fadcf1388a9de01396aa010a3e89abb3229bfa6922d37980a330f6a93c9
+
+#Output
+[preflight] Running pre-flight checks
+[preflight] Reading configuration from the cluster...
+[preflight] FYI: You can look at this config file with 'kubectl -n kube-system get cm kubeadm-config -o yaml'
+[kubelet-start] Writing kubelet configuration to file "/var/lib/kubelet/config.yaml"
+[kubelet-start] Writing kubelet environment file with flags to file "/var/lib/kubelet/kubeadm-flags.env"
+[kubelet-start] Starting the kubelet
+[kubelet-start] Waiting for the kubelet to perform the TLS Bootstrap...
+
+This node has joined the cluster:
+* Certificate signing request was sent to apiserver and a response was received.
+* The Kubelet was informed of the new secure connection details.
+
+Run 'kubectl get nodes' on the control-plane to see this node join the cluster.
+
+#check netstat -plntu
+#Output
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
+tcp        0      0 127.0.0.53:53           0.0.0.0:*               LISTEN      651/systemd-resolve
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      824/sshd
+tcp        0      0 127.0.0.1:46119         0.0.0.0:*               LISTEN      9843/containerd
+tcp        0      0 127.0.0.1:10248         0.0.0.0:*               LISTEN      11416/kubelet
+tcp        0      0 127.0.0.1:10249         0.0.0.0:*               LISTEN      11595/kube-proxy
+tcp6       0      0 :::10256                :::*                    LISTEN      11595/kube-proxy
+tcp6       0      0 :::22                   :::*                    LISTEN      824/sshd
+tcp6       0      0 :::10250                :::*                    LISTEN      11416/kubelet
+udp        0      0 127.0.0.53:53           0.0.0.0:*                           651/systemd-resolve
+udp        0      0 10.0.2.15:68            0.0.0.0:*                           2066/systemd-networ
+
+
+*******************************************************************************
+#get token 
+kubeadm token list
+
+TOKEN                     TTL         EXPIRES                USAGES                   DESCRIPTION                                                EXTRA GROUPS
+e9eqri.0cw1rq4i8tme93h0   23h         2023-04-30T02:55:00Z   authentication,signing   The default bootstrap token generated by 'kubeadm init'.   system:bootstrappers:kubeadm:default-node-token
+
+#Mặc định, <tokens> sẽ hết hạn sau 24 giờ. Nếu bạn thêm worker node khi <token> đã hết hạn, bạn có thể tạo <token> mới bằng cách chạy lệnh sau trên control-plane node:
+#create new token
+kubeadm token create
+#Output like 5didvk.d09sbcov8ph2amjw
+
+#get new hash
+openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2&gt;/dev/null | 
+openssl dgst -sha256 -hex | sed 's/^.* //'
+#Output like 8cb2de97839780a412b93877f8507ad6c94f73add17d5d7058e91741c9d5ec78
+
+#Lấy <control-plane-host>:<control-plane-port> bằng lệnh
+cat /$HOME/.kube/config | grep server
+#Output like server: https://192.168.56.2:6443
+
+*******************************************************************************
+KIỂM TRA CÁC COMPONENT CỦA KUBERNETES CLUSTER
+Ở control-plane kubemaster và worker nodes kubenode01, kubenode02 chạy lệnh:
+    sudo netstat -lntp
+ 
+Tất cả các components với LISTEN ports tương ứng sẽ được hiển thị như dưới đây:
+
+kubemaster
+
+    Active Internet connections (only servers)
+    Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
+    tcp        0      0 127.0.0.1:10248         0.0.0.0:*               LISTEN      8013/kubelet
+    tcp        0      0 127.0.0.1:10249         0.0.0.0:*               LISTEN      8182/kube-proxy
+    tcp        0      0 192.168.56.2:2379       0.0.0.0:*               LISTEN      7811/etcd
+    tcp        0      0 127.0.0.1:2379          0.0.0.0:*               LISTEN      7811/etcd
+    tcp        0      0 192.168.56.2:2380       0.0.0.0:*               LISTEN      7811/etcd
+    tcp        0      0 127.0.0.1:2381          0.0.0.0:*               LISTEN      7811/etcd
+    tcp        0      0 127.0.0.1:10257         0.0.0.0:*               LISTEN      7791/kube-controlle
+    tcp        0      0 127.0.0.1:10259         0.0.0.0:*               LISTEN      7907/kube-scheduler
+    tcp        0      0 127.0.0.1:34677         0.0.0.0:*               LISTEN      2826/containerd
+    tcp        0      0 127.0.0.53:53           0.0.0.0:*               LISTEN      817/systemd-resolve
+    tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      1380/sshd
+    tcp6       0      0 :::10250                :::*                    LISTEN      8013/kubelet
+    tcp6       0      0 :::6443                 :::*                    LISTEN      7884/kube-apiserver
+    tcp6       0      0 :::10256                :::*                    LISTEN      8182/kube-proxy
+    tcp6       0      0 :::22                   :::*                    LISTEN      1380/sshd
+ 
+kube-apiserver hiển thị chỉ LISTEN tới IPv6 :::6443 nhưng thực chất API server đang lắng nghe qua địa chỉ IPv6 cho phép truy cập qua địa chỉ IPv4, còn gọi là IPv4-mapped IPv6 address. Đây là lý do tại sao có thể chạy lệnh kubeadm join trên worker nodes thành công với --apiserver-advertise-address tới địa chỉ IPv4.
+Ví dụ, địa chỉ IPv4 192.168.5.2 có thể biểu diễn bằng địa chỉ IPv6 ::ffff:192.168.5.2.
+
+kubenode*
+
+    Active Internet connections (only servers)
+    Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+    tcp        0      0 127.0.0.1:10248         0.0.0.0:*               LISTEN      8987/kubelet        
+    tcp        0      0 127.0.0.1:10249         0.0.0.0:*               LISTEN      9208/kube-proxy     
+    tcp        0      0 127.0.0.1:39989         0.0.0.0:*               LISTEN      2785/containerd     
+    tcp        0      0 127.0.0.53:53           0.0.0.0:*               LISTEN      782/systemd-resolve 
+    tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      1431/sshd
+    tcp6       0      0 :::10250                :::*                    LISTEN      8987/kubelet        
+    tcp6       0      0 :::10256                :::*                    LISTEN      9208/kube-proxy     
+    tcp6       0      0 :::22                   :::*                    LISTEN      1431/sshd
+
+******************************************************************************* 
+#Edit Node Role
+kubectl label node <node-name> node-role.kubernetes.io/worker=worker
+kubectl label node kubenode01 node-role.kubernetes.io/worker=worker
+kubectl label node kubenode02 node-role.kubernetes.io/worker=worker   
+
+*******************************************************************************
+# Install Metrics Server
+kubectl apply -f https://raw.githubusercontent.com/techiescamp/kubeadm-scripts/main/manifests/metrics-server.yaml
+*******************************************************************************
+CÀI ĐẶT POD NETWORK ADD-ON
+    Chạy lệnh kubectl get nodes trên control plane để kiểm tra các node đã thêm vào cluster
+
+    NAME           STATUS     ROLES           AGE    VERSION
+    kubemaster     NotReady   control-plane   3h1m   v1.26.2
+    kubenode01     NotReady   <none>          3h     v1.26.2
+    kubenode02     NotReady   <none>          179m   v1.26.2
+     
+    Có thể thấy, các máy ảo kubemaster, kubenode01, kubenode02 đã được thêm vào Kubernetes cluster nhưng đang có STATUS là NotReady.
+    
+    Chạy lệnh kubectl get pods -A trên control plane để xem tất cả pod trong kube-system namespace
+
+        NAMESPACE     NAME                                   READY   STATUS    RESTARTS   AGE
+        kube-system   coredns-787d4945fb-5cwlq               0/1     Pending   0          3h8m
+        kube-system   coredns-787d4945fb-q2s4p               0/1     Pending   0          3h8m
+        kube-system   etcd-controlplane                      1/1     Running   0          3h8m
+        kube-system   kube-apiserver-controlplane            1/1     Running   0          3h8m
+        kube-system   kube-controller-manager-controlplane   1/1     Running   0          3h8m
+        kube-system   kube-proxy-7twwr                       1/1     Running   0          3h7m
+        kube-system   kube-proxy-8mxt7                       1/1     Running   0          3h8m
+        kube-system   kube-proxy-v9rc6                       1/1     Running   0          3h8m
+        kube-system   kube-scheduler-controlplane            1/1     Running   0          3h9m
+     
+    Bạn phải triển khai Container Network Interface (CNI) hỗ trợ Pod network add-on để các Pod có thể giao tiếp với nhau. 
+    Cluster DNS (CoreDNS) sẽ không được khởi động cho đến khi hoàn thất thiết lập pod network.
+    Pod network add-ons là Kubernetes-specific CNI plugins cung cấp kết nối mạng giữa các pod trong một Kubernetes cluster. 
+    Nó tạo một mạng overlay ảo phủ toàn bộ cluster và gắn cho mỗi pod một địa chỉ IP riêng.
+    Trong khi CNI plugins có thể được sử dụng với mọi container runtime, pod network add-ons dành riêng cho Kubernetes và cung cấp chức năng mạng cần thiết cho mô hình mạng Kubernetes. 
+    Một số ví dụ về pod network add-ons có kể đến Calico, Flannel, and Weave Net. (Xem thêm các pod network add-ons khác tại đây)
+    Trong hướng dẫn này, chúng ta sẽ sử dụng Weave Net add-ons. Nó dễ dàng cài đặt, sử dụng và phù hợp với việc triển khai ở quy mô nhỏ.
+    Để cài đặt nó cho Kubernetes cluster, chạy lệnh dưới đây trên control plane kubemaster:
+
+        wget https://github.com/weaveworks/weave/releases/download/v2.8.1/weave-daemonset-k8s.yaml
+        spec:
+        ...
+            template:
+            ...
+                spec:
+                ...
+                    containers:
+                    ...
+                        env:
+                        ...
+                        - name: IPALLOC_RANGE #add this
+                          value: 10.244.0.0/16 #add this
+                        name: weave
+
+
+        kubectl apply -f weave-daemonset-k8s.yaml
+     
+    Output sẽ như sau
+
+        serviceaccount/weave-net created
+        clusterrole.rbac.authorization.k8s.io/weave-net created
+        clusterrolebinding.rbac.authorization.k8s.io/weave-net created
+        role.rbac.authorization.k8s.io/weave-net created
+        rolebinding.rbac.authorization.k8s.io/weave-net created
+        daemonset.apps/weave-net created
+     
+    Cần đảm bảo rằng dải mạng của Pod không bị trùng lặp với mạng trên các máy trong cluster. Nếu bạn khai báo --pod-network-cidr khi chạy kubeadm init, phải thêm tham số IPALLOC_RANGE vào tệp YAML của Weave network plugin. Chạy lệnh sau trên control plane kubemaster:
+
+        kubectl edit ds weave-net -n kube-system
+     
+    Lệnh này sẽ cho phép bạn chỉnh sửa tệp YAML của weave-net daemon set. Tìm đến phần spec của container có tham số name: weave để thêm biến môi trường IPALLOC_RANGE và truyền tham số --pod-network-cidr khi chạy kubeadm init. (Tệp được mở trong trình chỉnh sửa vi)
+
+        spec:
+        ...
+            template:
+            ...
+                spec:
+                ...
+                    containers:
+                    ...
+                        env:
+                        ...
+                        - name: IPALLOC_RANGE
+                          value: 10.244.0.0/16
+                        name: weave
+     
+    Lưu tệp và đợi một vài phút để weave-net daemon set khởi động lại các pod.
+
+    
+*******************************************************************************
+
+    #Or using flannel
+    sudo kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+    sudo kubectl apply -f https://github.com/coreos/flannel/raw/master/Documentation/kube-flannel.yml
+
+    #Delete weave-net pods configuration
+    kubectl delete -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')"
+    #Then change podCIDR by running following command on your master node:
+    sudo kubeadm init phase control-plane controller-manager --pod-network-cidr=192.168.0.0/16
+
+#Install Calico CNI
+Do this configuration on master nodes
+
+curl https://raw.githubusercontent.com/projectcalico/calico/v3.25.1/manifests/calico.yaml -O
+kubectl apply -f calico.yaml
+
+
+
+    #Apply Calico
+kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.1/manifests/tigera-operator.yaml
+kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.1/manifests/custom-resources.yaml
+#edit cidr: 192.168.0.0/16 to cidr=10.244.0.0/16
+watch kubectl get pods -n calico-system
+
+*******************************************************************************
+#for testing only
+
+kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.1/manifests/tigera-operator.yaml
+kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.0/manifests/tigera-operator.yaml
+https://github.com/projectcalico/calico/tree/master/manifests
+curl https://raw.githubusercontent.com/projectcalico/calico/v3.25.1/manifests/custom-resources.yaml -O
+nano custom-resources.yaml
+kubectl create -f custom-resources.yaml
+
+#If the kube controllers pod stays in the pending state for too long, try issuing the following command:
+kubectl taint nodes --all node-role.kubernetes.io/control-plane-
+#Remove node taints from the node.
+kubectl taint nodes --all node-role.kubernetes.io/master-
+
+kubectl get pods -n calico-system
+kubectl get nodes -o wide
+
+#Using calicoctl instead of kubectl
+https://docs.tigera.io/calico/latest/operations/calicoctl/install
+*******************************************************************************    
+    THIẾT LẬP THÀNH CÔNG
+    Chạy lại lệnh kubectl get pods -A trên control plane để kiểm tra, bạn sẽ thấy 3 pods của weave-net daemon set và coredns pods hiển thị đang chạy. (STATUS: Running)
+
+        NAMESPACE     NAME                                 READY   STATUS    RESTARTS   AGE
+        kube-system   coredns-787d4945fb-48tbh             1/1     Running   0          6m57s
+        kube-system   coredns-787d4945fb-nrsp7             1/1     Running   0          6m57s
+        kube-system   etcd-kubemaster                      1/1     Running   0          7m10s
+        kube-system   kube-apiserver-kubemaster            1/1     Running   0          7m12s
+        kube-system   kube-controller-manager-kubemaster   1/1     Running   0          7m10s
+        kube-system   kube-proxy-8sxss                     1/1     Running   0          4m19s
+        kube-system   kube-proxy-j7z6x                     1/1     Running   0          6m58s
+        kube-system   kube-proxy-nj8j2                     1/1     Running   0          4m14s
+        kube-system   kube-scheduler-kubemaster            1/1     Running   0          7m10s
+        kube-system   weave-net-7mldz                      2/2     Running   0          2m
+        kube-system   weave-net-dk5dl                      2/2     Running   0          70s
+        kube-system   weave-net-znhnm                      2/2     Running   0          2m
+     
+    Chạy kubectl get nodes để kiểm tra trạng thái các node trong cluster, chúng sẽ đều ở trạng thái sẵn sàng. (STATUS: Ready)
+
+        NAME         STATUS   ROLES           AGE     VERSION
+        kubemaster   Ready    control-plane   9m54s   v1.26.2
+        kubenode01   Ready    &lt;none&gt;          6m59s   v1.26.2
+        kubenode02   Ready    &lt;none&gt;          6m54s   v1.26.2
+     
+    Nếu bạn thắc mắc tại sao ROLES của các worker node hiển thị <none>, điều đó có nghĩa là các node này đang không chạy các control plane component hay Kubernetes services chỉ định role. Thông thường worker nodes sẽ không chạy các control plane component, vì thế điều này hoàn toàn bình thường trong một Kubernetes cluster.
+    
+    Networking là một phần trung tâm của Kubernetes, xem thêm Kubernetes networking model để biết thêm thông tin.
+    
+    Nếu muốn tùy chỉnh cluster với kubeadm, bạn có thể đọc Create cluster kubeadm.
+
+*******************************************************************************
+#Creat namespace
+kubectl create namespace tigera-operator
+kubectl apply -f <path> --namespace <name>
+*******************************************************************************   
+    CLEAN UP
+    Sẽ có lúc bạn gặp những lỗi không biết cách giải quyết hoặc đơn giản chỉ muốn bắt đầu lại từ đầu, phần này sẽ dành cho bạn!
+    
+    GIỮ LẠI CÁC MÁY ẢO, CHỈ DỌN DẸP KUBERNETES CLUSTER
+    LOẠI BỎ NODE
+    Chạy lệnh này để bỏ tất cả các pod đang chạy trên node theo đúng quy trình:
+
+        kubectl drain &lt;node name&gt; --delete-emptydir-data --force --ignore-daemonsets
+     
+    Reset các trạng thái được cài đặt bởi kubeadm
+
+        kubeadm reset
+     
+    Quá trình reset này sẽ không bao gồm việc reset hay dọn dẹp iptables rules hay IPVS tables. Nếu bạn muốn reset iptables, phải thực hiện thủ công như sau:
+
+        iptables -F &amp;&amp; iptables -t nat -F &amp;&amp; iptables -t mangle -F &amp;&amp; iptables -X
+     
+    Nếu muốn reset IPVS tables, bạn phải chạy lệnh dưới đây:
+    
+        ipvsadm -C
+     
+    Bây giờ tiến hành loại bỏ node khỏi cluster:
+    
+        kubectl delete node &lt;node name&gt;
+     
+    Nếu muốn thiết lập lại, run kubeadm init (thiết lập thành control-plane) hoặc kubeadm join (thiết lập thành worker node) với các đối số phù hợp.
+*******************************************************************************    
+    DỌN DẸP CONTROL PLANE
+    Tiến hành quá trình đảo ngược lại tất cả các thay đổi kubeadm init đã thực hiện trên máy với lệnh:
+    
+        sudo kubeadm reset --kubeconfig="$HOME/.kube/config"
+     
+    --kubeconfig=string: Xóa kubeconfig file được dùng để giao tiếp với cluster. Nếu không khai báo, một số thư mục sẽ được tìm để xóa kubeconfig file. (Nếu bạn thiết lập cho non-root user sau khi chạy kubeadm init, đừng quên xóa tệp thiết lập $HOME/.kube/config)
+    
+    Tương tự như đã đề cập ở phần loại bỏ node, quá trình reset này sẽ không reset hay dọn dẹp iptables rules hay IPVS tables. Nếu muốn reset, bạn phải làm thủ công như khi loại bỏ node.   
+*******************************************************************************
+
+the best way to resolve Kubernetes problems is checking related services status like kubelet , docker, containerd , CNI 
+and if they all are fine and work correctly, I think kubectl also should work fine as well. 
+If they have problems, it’s better to reconfigure them to resolve their problems.
+
+
+kubectl config get-contexts
+cat ~/.kube/config
+cd ~/.kube
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

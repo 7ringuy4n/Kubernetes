@@ -1,0 +1,216 @@
+#Referrence
+https://viblo.asia/p/trien-khai-mot-ung-dung-tren-kubernetes-cluster-voi-argocd-minikube-va-ngrok-aNj4vzA846r
+https://www.youtube.com/watch?v=Kt5YM490mwQ&ab_channel=KienLeTV
+
+1. Cài đặt và bắt đầu với Minikube
+Minikube là tool dựng một Kubernetes cluster dưới máy local cá nhân miễn phí.
+
+Các bạn xem thêm tài liệu ở page.
+
+Nếu các bạn đang dùng máy Linux như mình bạn cài bằng command này:
+
+# one-line command to install minikube on Linux
+$ wget https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64 \
+    --quiet \
+    --show-progress \
+    --output-document=/tmp/minikube-linux-amd64 \
+    && sudo install /tmp/minikube-linux-amd64 /usr/local/bin/minikube
+
+Kubectl là một cli tool để quản lí kubernetes cluster.
+
+Bạn cần cài đặt hoặc cập nhập Minikube dùng lệnh sau.
+
+Nếu các bạn đang dùng máy Linux như mình bạn cài bằng command này:
+
+# one-line command to install kubectl on Linux
+$ LATEST=$(wget https://storage.googleapis.com/kubernetes-release/release/stable.txt \
+    --quiet \
+    --output-document=-) \
+    && wget https://storage.googleapis.com/kubernetes-release/release/$LATEST/bin/linux/amd64/kubectl \
+    --quiet \
+    --show-progress \
+    --output-document=/tmp/kubectl \
+    && chmod +x /tmp/kubectl \
+    && sudo mv /tmp/kubectl /usr/local/bin/kubectl
+
+Băt đầu Minikube :
+
+$ minikube start
+
+Kiểm tra cluster đang làm việc :
+
+# check the kubectl current context
+$ kubectl config current-context
+minikube
+
+# ping the cluster by listing the namespaces
+$ kubectl get ns
+NAME              STATUS   AGE
+default           Active   2m00s
+kube-node-lease   Active   2m00s
+kube-public       Active   2m00s
+kube-system       Active   2m00s
+
+2. Cài đặt Argo CD trên Kubernetes cluster
+Argo CD là phần mềm mã nguồn mở sử dụng GitOps để triển khai CD trên Kubernetes.
+
+Argo CD được cài đặt trên kubernetes cluster thông qua namespace riêng biệt.
+
+Argo CD là một pull-based deployment tool. Nó kết nối với Git và tự động cập nhập manifest và đồng bộ config mới nhất cho cluster.
+
+Bắt đầu cài đặt Argo CD thông qua command :
+
+# create the namespace
+$ kubectl create namespace argocd
+
+# apply the installation manifest
+$ kubectl apply \
+    --namespace argocd \
+    --filename https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+# wait for everything to be launched and running
+$ watch kubectl get all --namespace argocd
+NAME                                     READY   STATUS    RESTARTS   AGE
+pod/argocd-application-controller-0      1/1     Running   0          100s
+pod/argocd-dex-server-59d44b9f99-8kp7d   1/1     Running   0          100s
+pod/argocd-redis-79bdbdf78f-247q5        1/1     Running   0          100s
+pod/argocd-repo-server-b6f8cdc6f-4m8h5   1/1     Running   0          100s
+pod/argocd-server-bdc697879-rdk89        1/1     Running   0          100s
+
+NAME                            TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)                      AGE
+service/argocd-dex-server       ClusterIP   10.100.46.74    <none>        5556/TCP,5557/TCP,5558/TCP   100s
+service/argocd-metrics          ClusterIP   10.98.170.62    <none>        8082/TCP                     100s
+service/argocd-redis            ClusterIP   10.102.83.160   <none>        6379/TCP                     100s
+service/argocd-repo-server      ClusterIP   10.96.100.93    <none>        8081/TCP,8084/TCP            100s
+service/argocd-server           ClusterIP   10.96.151.61    <none>        80/TCP,443/TCP               100s
+service/argocd-server-metrics   ClusterIP   10.102.166.2    <none>        8083/TCP                     100s
+
+NAME                                 READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/argocd-dex-server    1/1     1            1           100s
+deployment.apps/argocd-redis         1/1     1            1           100s
+deployment.apps/argocd-repo-server   1/1     1            1           100s
+deployment.apps/argocd-server        1/1     1            1           100s
+
+NAME                                           DESIRED   CURRENT   READY   AGE
+replicaset.apps/argocd-dex-server-59d44b9f99   1         1         1       100s
+replicaset.apps/argocd-redis-79bdbdf78f        1         1         1       100s
+replicaset.apps/argocd-repo-server-b6f8cdc6f   1         1         1       100s
+replicaset.apps/argocd-server-bdc697879        1         1         1       100s
+
+NAME                                             READY   AGE
+statefulset.apps/argocd-application-controller   1/1     100s
+
+Để truy cập web interface Argo CD các bạn dùng cần open port-forward  :
+
+$ kubectl port-forward \
+    --namespace argocd \
+    svc/argocd-server 8000:443
+Forwarding from 127.0.0.1:8000 -> 8080
+Forwarding from [::1]:8000 -> 8080
+
+Mở trình duyệt nhập https://localhost:8000 và đăng nhập
+
+Login bằng user admin và lấy mật khẩu bằng command:
+
+# get admin password
+$ kubectl get secret argocd-initial-admin-secret \
+    --namespace argocd \
+    --output jsonpath="{.data.password}" \
+    | base64 --decode \
+    && echo
+
+Kết nối với private repository
+
+Tạo một SSH key
+
+ssh-keygen -t ed25519 -f ~/.ssh/argocd-test.pem
+Enter passphrase (empty for no passphrase): # <press-enter>
+Enter same passphrase again: # <press-enter>
+Your identification has been saved in /home/xxxxx/.ssh/argocd-test.pem
+Your public key has been saved in /home/xxxxx/.ssh/argocd-test.pem.pub
+
+Đổi argocd-test.pem.pub thành argocd-test.pub
+
+$ mv ~/.ssh/argocd-test.pem.pub ~/.ssh/argocd-test.pub
+
+
+Mở public key và copy-paste :
+
+$ cat ~/.ssh/argocd-test.pub
+ssh-ed25519 AAAAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx username@computer
+
+Mở private key và copy-paste :
+
+cat ~/.ssh/argocd-test.pem
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3Blxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxQFBgc=
+-----END OPENSSH PRIVATE KEY-----
+
+Triển khai một ứng dụng với Argo CD
+
+Tạo một application argocd-app.yaml trên Argo CD
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-app
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: git@github.com:kienle1819/argocd-test.git
+    targetRevision: HEAD
+    path: k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: my-app
+
+  syncPolicy:
+    syncOptions:
+    - CreateNamespace=true
+
+    automated:
+      selfHeal:trueprune:true
+
+Chạy lệnh sau để apply application
+
+$ kubectl apply --filename argocd-app.yaml
+
+Truy cập application qua browser
+Trên Minikube cluster các bạn chạy:
+
+$ minikube service list
+|-------------|-----------------------|--------------|---------------------------|
+|  NAMESPACE  |         NAME          | TARGET PORT  |            URL            |
+|-------------|-----------------------|--------------|---------------------------|
+| argocd      | argocd-dex-server     | No node port |                           |
+| argocd      | argocd-metrics        | No node port |                           |
+| argocd      | argocd-redis          | No node port |                           |
+| argocd      | argocd-repo-server    | No node port |                           |
+| argocd      | argocd-server         | No node port |                           |
+| argocd      | argocd-server-metrics | No node port |                           |
+| default     | kubernetes            | No node port |                           |
+| kube-system | kube-dns              | No node port |                           |
+| my-app      | my-app-svc            |         5000 |                           |
+|-------------|-----------------------|--------------|---------------------------|
+
+Open port để truy cập vào ứng dụng :
+
+kubectl port-forward \
+    --namespace my-app \
+    svc/my-app-svc 5000:5000
+
+Public domain với Ngrok
+Ngrok giúp các bạn public một domain từ local để test hoặc làm lab khi không có $ để mua domain. Các bạn đăng kí và tạo token để authencator nhé.
+
+Sau khi cài đặt xong thì các bạn muốn public port nào ở local thì thực hiện comand để open:
+
+$ ngrok http https://localhost:8000
+$ ngrok http http://localhost:5000
+
+Stop resource cluster :
+$ minikube stop

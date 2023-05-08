@@ -1,0 +1,48 @@
+
+#use chocolatey + minikube + kubectl
+https://pet2cattle.com/2021/01/multinode-minikube
+
+minikube start --driver=virtualbox #default profile name is minikube
+minikube start --driver=virtualbox -p dev
+minikube start --driver=virtualbox -p test
+minikube start --driver=virtualbox -p test --nodes 2 #create 1 master node and 2 worker nodes
+#or minikube start --addons volumesnapshots,csi-hostpath-driver --apiserver-port=6443 --container-runtime=containerd -p mc-demo --kubernetes-version=1.21.2
+minikube profile list #list profile
+minukube profile dev #set profile to dev
+minikube delete -p <profilename> #delete profile
+minikube ssh -p <profile-name> #ssh to master node
+ssh -i ~/.minikube\machines\test-m02/id_rsa docker@192.168.59.105
+ssh -i ~/.minikube\machines\test/id_rsa docker@192.168.59.103
+
+
+#https://minikube.sigs.k8s.io/docs/commands/node/
+minikube node -p <profile-name> list 
+
+minikube addons list
+
+vagrant ssh master
+kubectl get nodes
+kubectl create deployment demo --image=nginx --replicas=6 #wait for while till all pods running
+kubectl get pods -o wide
+kubectl get pods -n kube-system #get pods in namespace
+kubectl describe pod <pod-name>
+#if 1 node down, nodes event will take a while till status of that failed node is NotReady then Pods event takes few minutes till status of that pods belonging to failed nodes are Terminating
+#all pods belonging to failed nodes will move to running node
+
+
+kubectl apply -f https://raw.githubusercontent.com/scriptcamp/kubeadm-scripts/main/manifests/sample-app.yaml
+
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP group default qlen 1000
+    link/ether 08:00:27:10:0b:45 brd ff:ff:ff:ff:ff:ff
+    altname enp0s3
+    inet 10.0.2.15/24 metric 100 brd 10.0.2.255 scope global dynamic eth0
+       valid_lft 84381sec preferred_lft 84381sec
+    inet6 fe80::a00:27ff:fe10:b45/64 scope link
+       valid_lft forever preferred_lft forever
+3: eth1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP group default qlen 1000
+    link/ether 08:00:27:e3:99:e3 brd ff:ff:ff:ff:ff:ff
+    altname enp0s8
+    inet 10.0.0.10/24 brd 10.0.0.255 scope global eth1
+       valid_lft forever preferred_lft forever
+    inet6 fe80::a00:27ff:fee3:99e3/64 scope link
+       valid_lft forever preferred_lft forever
