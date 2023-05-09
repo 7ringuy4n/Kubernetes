@@ -114,7 +114,7 @@ Several masters and several workers
 #All the instructions for Kind installation and configuration are well described in the Kind documentation.
 https://kind.sigs.k8s.io/docs/user/quick-start/
 
-#K3S - CRI
+#K3S - CRI https://pgillich.medium.com/setup-lightweight-kubernetes-with-k3s-6a1c57d62217
 #K3S is a light Kubernetes version developed by Rancher. 
 #It has been created for production use on small servers, IoT appliances, etc. 
 #The binary is less than 50 Mo and it can be run on a very small virtual machine
@@ -246,3 +246,50 @@ kubectl get pod <name> -o yaml > <name>.yml
 
 https://kubernetes.io/docs/tasks/tools/
 https://minikube.sigs.k8s.io/docs/start/
+
+
+
+https://faun.pub/environment-for-comparing-several-on-premise-kubernetes-distributions-k3s-kind-kubeadm-a53675a80a00
+
+Example setups
+K3s can be deployed in the shortest time. K3s and KinD were deployed faster on VirtualBox than bare metal. The secret reason for this strange result is the disk: the VirtualBox used SSD for the VM disk, the bare metal OS used HDD.
+
+Cluster nodes:
+
+K3s: 1 (master and worker on same node)
+MicroK8S: 1 (master and worker on same node)
+Kind: 4 (1 master, 3 worker)
+kubeadm in VMs: 3 (1 master, 2 workers)
+HW parameters:
+
+low-end laptop: Intel Celeron, 2 procs, 4 GB RAM, HDD
+medium laptop: Intel i7–8565U, 8 processors, 16 GB RAM, SSD
+low-end desktop: AMD Phenom II, 4 procs, 16 GB RAM, HDD
+VirtualBox VM on low-end desktop: 4 procs, 8 GB RAM, SSD
+Deployment times:
+
+Low-end laptop, Lubuntu 16.04
+
+K3s (1 node): 6 min
+Kind (3 workers): 14 min
+Medium laptop, Ubuntu 20.04
+
+K3s (1 node): 3.5 min
+MicroK8s (1 node): 2.5 min
+KinD (1 worker): 4.5 min
+KinD (3 workers): 6 min
+kubeadm in KVM VMs (1 master, 2 workers): 10.5 min
+Low-end desktop, Ubuntu 18.04
+
+K3s (1 node): 4 min
+Kind (3 workers): 8.5 min
+kubeadm in KVM VMs (1 master, 2 workers): 23 min
+Low-end desktop, Windows 10
+
+kubeadm in VirtualBox VMs (1 master, 2 workers): 17.5 min
+Low-end desktop, Windows 10, VirtualBox VM, Lubuntu 20.04
+
+K3s (1 node): 2.5 min
+Kind (3 workers): 6.5 min
+Kind (1 worker): 6 min
+kubeadm in nested KVM VMs (1 master, 2 workers): 40 min
