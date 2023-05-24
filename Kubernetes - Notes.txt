@@ -25,6 +25,7 @@ Application Settings - Configmaps, Secrets
 Observalibilty - Startup, Readlines, Liveness Probes
 Dashboards 
 Scaling - Autoscaling
+https://www.knowledgehut.com/blog/devops/docker-vs-containerd
 ******************************************************************************
 Master Node/Control Plane{
     etcd #where key value store for cluster state data, only API Server communicates to, not a database or datastore for applications to use
